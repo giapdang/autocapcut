@@ -119,9 +119,63 @@ class CapCutService:
         for folder_path in project_folders:
             project = Project.from_folder(folder_path)
             if project:
-                # Lọc bỏ project trong thùng rác nếu cần
+                # QUAN TRỌNG: Lọc bỏ project trong thùng rác
+                # Chỉ lấy project có is_trash = false hoặc không có field is_trash
                 if include_trash or not project.is_trash:
                     projects.append(project)
+
+        # Sắp xếp theo ngày chỉnh sửa (mới nhất trước)
+        projects.sort(
+            key=lambda p: p.modified_date or p.created_date,
+            reverse=True
+        )
+
+        return projects
+
+    def get_current_projects(self, data_folder: Optional[str] = None) -> List[Project]:
+        """
+        Lấy CHỈ CÁC PROJECT HIỆN TẠI (không bao gồm thùng rác và cloud).
+
+        QUAN TRỌNG:
+        - CHỈ lấy project có is_trash = false hoặc không có field is_trash
+        - BỎ QUA project có is_trash = true
+        - BỎ QUA project từ cloud (chỉ lấy local)
+
+        Args:
+            data_folder: Đường dẫn thư mục data (tùy chọn, nếu không sẽ dùng config)
+
+        Returns:
+            Danh sách Project objects của các project hiện tại
+        """
+        projects = []
+
+        # Sử dụng data_folder được truyền vào hoặc tìm tự động
+        folder = data_folder or self.find_data_folder()
+        if not folder:
+            return projects
+
+        # Liệt kê các folder con (mỗi folder là một project)
+        project_folders = self.file_service.list_folders(folder)
+
+        for folder_path in project_folders:
+            # Đọc draft_info.json để kiểm tra trạng thái
+            draft_info_path = os.path.join(folder_path, 'draft_info.json')
+            if not os.path.exists(draft_info_path):
+                continue
+
+            # Đọc và kiểm tra is_trash
+            data = self.file_service.read_json(draft_info_path)
+
+            # QUAN TRỌNG: Chỉ lấy project KHÔNG PHẢI thùng rác
+            # Kiểm tra field is_trash hoặc draft_is_deleted
+            is_trash = data.get('is_trash', data.get('draft_is_deleted', False))
+            if is_trash:
+                continue  # BỎ QUA project trong thùng rác
+
+            # Tạo Project object
+            project = Project.from_folder(folder_path)
+            if project:
+                projects.append(project)
 
         # Sắp xếp theo ngày chỉnh sửa (mới nhất trước)
         projects.sort(

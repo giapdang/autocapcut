@@ -173,9 +173,10 @@ if CTK_AVAILABLE:
             header.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
             header.grid_columnconfigure(0, weight=1)
 
+            # Label hiển thị số lượng project và ghi chú về lọc
             self.project_count_label = ctk.CTkLabel(
                 header,
-                text="Projects (0)",
+                text="Projects hiện tại (0) - không bao gồm thùng rác và cloud",
                 font=ctk.CTkFont(size=14, weight="bold")
             )
             self.project_count_label.grid(row=0, column=0, sticky="w")
@@ -373,7 +374,9 @@ if CTK_AVAILABLE:
                 self._project_items.append(item)
 
             # Cập nhật count label
-            self.project_count_label.configure(text=f"Projects ({len(projects)})")
+            count = len(projects)
+            label_text = f"Projects hiện tại ({count}) - không bao gồm thùng rác và cloud"
+            self.project_count_label.configure(text=label_text)
 
         def select_all_projects(self) -> None:
             """Chọn tất cả projects."""

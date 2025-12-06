@@ -86,7 +86,9 @@ class Project:
                         )
 
                     # Kiểm tra trạng thái trash
-                    is_trash = info.get('draft_is_deleted', False)
+                    # QUAN TRỌNG: Chỉ lấy project KHÔNG PHẢI thùng rác
+                    # Kiểm tra field is_trash (hoặc draft_is_deleted cho tương thích)
+                    is_trash = info.get('is_trash', info.get('draft_is_deleted', False))
 
                     metadata = info
 

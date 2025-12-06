@@ -82,6 +82,11 @@ python main.py
    - Ngày tạo
    - Ngày chỉnh sửa gần nhất
 
+> ⚠️ **Lưu ý quan trọng**: Tool CHỈ hiển thị project HIỆN TẠI (local), KHÔNG hiển thị:
+> - ❌ Project trong thùng rác (is_trash = true)
+> - ❌ Project từ cloud
+> - ✅ CHỈ project local hiện tại
+
 ### Bước 3: Chọn projects
 
 1. Tick chọn các projects muốn xuất
@@ -203,9 +208,13 @@ pip install customtkinter
 ## 📝 Ghi chú
 
 - Tool chỉ hoạt động trên Windows
+- Tool CHỈ hiển thị project HIỆN TẠI (local)
+- KHÔNG hiển thị project trong thùng rác
+- KHÔNG hiển thị project từ cloud
 - Cần đóng CapCut trước khi chạy export
 - Video được lưu theo cài đặt mặc định của CapCut
 - Không nên sử dụng máy tính khi đang export
+- Mỗi project sẽ được xuất tuần tự, tự động đóng/mở CapCut
 
 ## 🤝 Đóng góp
 
