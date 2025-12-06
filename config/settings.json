@@ -1,0 +1,11 @@
+{
+    "capcut_exe_path": "",
+    "data_folder_path": "",
+    "export_settings": {
+        "resolution": "1080p",
+        "fps": 30,
+        "quality": "high",
+        "format": "mp4",
+        "output_folder": ""
+    }
+}
