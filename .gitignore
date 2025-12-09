@@ -108,3 +108,13 @@ venv.bak/
 # OS
 .DS_Store
 Thumbs.db
+
+# Computer Vision Features - Generated files
+screenshots/
+logs/
+autocapcut.db
+autocapcut.db-journal
+templates/*.json
+*.pyc
+__pycache__/
+.pytest_cache/

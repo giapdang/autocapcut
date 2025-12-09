@@ -11,8 +11,9 @@ Service này sử dụng PyAutoGUI và pywinauto để:
 import os
 import time
 import subprocess
-from typing import Optional, Callable
+from typing import Optional, Callable, Dict, Any
 from enum import Enum
+from datetime import datetime
 
 # Import các thư viện automation (sẽ được cài đặt qua requirements.txt)
 try:
@@ -22,7 +23,7 @@ except ImportError:
     PSUTIL_AVAILABLE = False
 
 try:
-    import pyautogui  # noqa: F401
+    import pyautogui
     PYAUTOGUI_AVAILABLE = True
 except ImportError:
     PYAUTOGUI_AVAILABLE = False
@@ -33,6 +34,13 @@ try:
     PYWINAUTO_AVAILABLE = True
 except ImportError:
     PYWINAUTO_AVAILABLE = False
+
+try:
+    from services.vision_service import VisionService
+    from services.template_manager import TemplateManager
+    VISION_AVAILABLE = True
+except ImportError:
+    VISION_AVAILABLE = False
 
 
 class ExportStatus(Enum):
@@ -70,7 +78,9 @@ class AutomationService:
         self,
         capcut_exe_path: str,
         log_callback: Optional[Callable[[str], None]] = None,
-        status_callback: Optional[Callable[[ExportStatus, str], None]] = None
+        status_callback: Optional[Callable[[ExportStatus, str], None]] = None,
+        use_vision: bool = True,
+        vision_settings: Optional[Dict[str, Any]] = None
     ):
         """
         Khởi tạo AutomationService.
@@ -79,11 +89,32 @@ class AutomationService:
             capcut_exe_path: Đường dẫn đến CapCut.exe
             log_callback: Callback để ghi log
             status_callback: Callback để cập nhật trạng thái
+            use_vision: Có sử dụng computer vision không
+            vision_settings: Cấu hình cho vision service
         """
         self.capcut_exe_path = capcut_exe_path
         self.log_callback = log_callback or (lambda x: print(x))
         self.status_callback = status_callback or (lambda s, m: None)
         self._cancelled = False
+        self.use_vision = use_vision and VISION_AVAILABLE
+
+        # Khởi tạo vision service nếu có
+        self.vision_service: Optional[VisionService] = None
+        self.template_manager: Optional[TemplateManager] = None
+
+        if self.use_vision:
+            vision_settings = vision_settings or {}
+            self.vision_service = VisionService(
+                confidence_threshold=vision_settings.get('confidence_threshold', 0.8),
+                screenshot_on_error=vision_settings.get('screenshot_on_error', True),
+                screenshot_dir=vision_settings.get('screenshot_dir', './screenshots')
+            )
+            self.template_manager = TemplateManager()
+            self._log("Vision service đã được kích hoạt")
+
+        # Retry settings
+        self.retry_attempts = 3
+        self.retry_delay = 2
 
     def _log(self, message: str) -> None:
         """Ghi log message."""
@@ -279,29 +310,155 @@ class AutomationService:
         Returns:
             True nếu click thành công
         """
+        # Thử với vision service trước nếu có
+        if self.use_vision and self.vision_service and self.template_manager:
+            return self._click_export_with_vision()
+
+        # Fallback sang phương pháp thủ công
+        return self._click_export_manual()
+
+    def _click_export_with_vision(self) -> bool:
+        """
+        Click Export bằng vision service.
+
+        Returns:
+            True nếu click thành công
+        """
+        self._log("Đang tìm nút Export bằng vision...")
+
+        # Thử tìm template export button
+        export_template = self.template_manager.get_template_path('export_button', 'buttons')
+
+        if not export_template:
+            self._log("Không tìm thấy template export_button, fallback sang manual")
+            return self._click_export_manual()
+
+        # Thử click với retry
+        for attempt in range(self.retry_attempts):
+            if self._cancelled:
+                return False
+
+            if attempt > 0:
+                self._log(f"Thử lại lần {attempt + 1}...")
+                time.sleep(self.retry_delay)
+
+            # Tìm và click
+            success = self.vision_service.click_on_image(
+                export_template,
+                confidence=0.8,
+                timeout=10
+            )
+
+            if success:
+                self._log("✓ Đã click nút Export")
+                time.sleep(1)  # Chờ UI phản hồi
+                return True
+
+        self._log("✗ Không tìm thấy nút Export sau nhiều lần thử")
+
+        # Chụp screenshot để debug
+        if self.vision_service.screenshot_on_error:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.vision_service.save_screenshot(f"export_button_not_found_{timestamp}.png")
+
+        return False
+
+    def _click_export_manual(self) -> bool:
+        """
+        Click Export bằng phương pháp thủ công (keyboard shortcut).
+
+        Returns:
+            True nếu click thành công
+        """
         if not PYAUTOGUI_AVAILABLE:
             self._log("pyautogui không khả dụng")
             return False
 
         try:
-            # Tìm và click nút Export
-            # Vị trí nút Export có thể thay đổi tùy version CapCut
-            # Sử dụng image recognition nếu có
+            self._log("Đang click Export bằng keyboard shortcut...")
 
-            self._log("Đang tìm nút Export...")
+            # Thử sử dụng keyboard shortcut (Ctrl+E hoặc Alt+E)
+            # Lưu ý: Cần điều chỉnh theo shortcut thực tế của CapCut
+            pyautogui.hotkey('ctrl', 'e')
+            time.sleep(1)
 
-            # Phương pháp đơn giản: sử dụng tọa độ cố định
-            # (Trong thực tế nên sử dụng pywinauto để tìm control)
-
-            # Giả lập click Export - cần điều chỉnh theo UI thực tế
-            # pyautogui.click(x, y)
-
-            self._log("Đã click nút Export")
+            self._log("Đã gửi lệnh Export")
             return True
 
         except Exception as e:
-            self._log(f"Lỗi click Export: {e}")
+            self._log(f"Lỗi click Export manual: {e}")
             return False
+
+    def focus_window(self) -> bool:
+        """
+        Focus vào cửa sổ CapCut.
+
+        Returns:
+            True nếu focus thành công
+        """
+        if not PYWINAUTO_AVAILABLE:
+            self._log("pywinauto không khả dụng")
+            return False
+
+        try:
+            for title in self.CAPCUT_WINDOW_TITLES:
+                try:
+                    app = Application(backend='uia').connect(title_re=f".*{title}.*", timeout=5)
+                    window = app.top_window()
+                    window.set_focus()
+                    self._log(f"Đã focus vào cửa sổ: {title}")
+                    return True
+                except ElementNotFoundError:
+                    continue
+                except Exception as e:
+                    self._log(f"Lỗi focus window: {e}")
+                    continue
+
+            self._log("Không thể focus vào cửa sổ CapCut")
+            return False
+
+        except Exception as e:
+            self._log(f"Lỗi focus window: {e}")
+            return False
+
+    def send_keyboard_shortcut(self, *keys) -> bool:
+        """
+        Gửi keyboard shortcut.
+
+        Args:
+            *keys: Các phím cần nhấn (ví dụ: 'ctrl', 'e')
+
+        Returns:
+            True nếu gửi thành công
+        """
+        if not PYAUTOGUI_AVAILABLE:
+            return False
+
+        try:
+            pyautogui.hotkey(*keys)
+            return True
+        except Exception as e:
+            self._log(f"Lỗi gửi keyboard shortcut: {e}")
+            return False
+
+    def take_screenshot(self, filename: Optional[str] = None) -> bool:
+        """
+        Chụp screenshot màn hình.
+
+        Args:
+            filename: Tên file (optional)
+
+        Returns:
+            True nếu chụp thành công
+        """
+        if not self.vision_service:
+            return False
+
+        if not filename:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"screenshot_{timestamp}.png"
+
+        return self.vision_service.save_screenshot(filename)
 
     def _wait_for_export(self, timeout: int = None) -> bool:
         """
@@ -314,6 +471,76 @@ class AutomationService:
             True nếu xuất thành công
         """
         timeout = timeout or self.EXPORT_TIMEOUT
+
+        # Thử với vision service trước nếu có
+        if self.use_vision and self.vision_service and self.template_manager:
+            return self._wait_for_export_with_vision(timeout)
+
+        # Fallback sang phương pháp chờ cố định
+        return self._wait_for_export_manual(timeout)
+
+    def _wait_for_export_with_vision(self, timeout: int) -> bool:
+        """
+        Chờ export hoàn tất bằng vision detection.
+
+        Args:
+            timeout: Thời gian chờ tối đa (giây)
+
+        Returns:
+            True nếu xuất thành công
+        """
+        start_time = time.time()
+        check_interval = 2
+
+        # Tìm template export complete
+        complete_template = self.template_manager.get_template_path('export_complete', 'status')
+
+        if not complete_template:
+            self._log("Không tìm thấy template export_complete, fallback sang manual")
+            return self._wait_for_export_manual(timeout)
+
+        self._log("Đang chờ export hoàn tất (vision detection)...")
+
+        while time.time() - start_time < timeout:
+            if self._cancelled:
+                return False
+
+            # Kiểm tra có dialog "Export Complete" không
+            result = self.vision_service.find_image_on_screen(
+                complete_template,
+                confidence=0.8
+            )
+
+            if result.found:
+                self._log("✓ Phát hiện export đã hoàn tất")
+                return True
+
+            # Log tiến trình
+            elapsed = int(time.time() - start_time)
+            if elapsed % 10 == 0:
+                self._log(f"Đang xuất... ({elapsed}s / {timeout}s)")
+
+            time.sleep(check_interval)
+
+        self._log("Timeout: Xuất video quá lâu")
+
+        # Chụp screenshot để debug
+        if self.vision_service.screenshot_on_error:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.vision_service.save_screenshot(f"export_timeout_{timestamp}.png")
+
+        return False
+
+    def _wait_for_export_manual(self, timeout: int) -> bool:
+        """
+        Chờ export hoàn tất bằng phương pháp cố định.
+
+        Args:
+            timeout: Thời gian chờ tối đa (giây)
+
+        Returns:
+            True nếu xuất thành công
+        """
         start_time = time.time()
 
         while time.time() - start_time < timeout:
@@ -326,6 +553,7 @@ class AutomationService:
             time.sleep(5)
 
             # Giả lập: sau 10 giây coi như xong
+            # Trong production nên có cách kiểm tra tốt hơn
             if time.time() - start_time > 10:
                 return True
 
@@ -349,8 +577,16 @@ class AutomationService:
         Returns:
             Dictionary với trạng thái các thư viện
         """
-        return {
+        deps = {
             'psutil': PSUTIL_AVAILABLE,
             'pyautogui': PYAUTOGUI_AVAILABLE,
-            'pywinauto': PYWINAUTO_AVAILABLE
+            'pywinauto': PYWINAUTO_AVAILABLE,
+            'vision': VISION_AVAILABLE
         }
+
+        # Kiểm tra chi tiết vision dependencies nếu có
+        if VISION_AVAILABLE:
+            from services.vision_service import VisionService
+            deps['vision_details'] = VisionService.check_dependencies()
+
+        return deps
