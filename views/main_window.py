@@ -9,6 +9,7 @@ Module này chứa giao diện chính với:
 - Log area
 """
 
+import threading
 from typing import List
 
 try:
@@ -377,7 +378,6 @@ if CTK_AVAILABLE:
             """Xử lý khi click nút Open project."""
             if self.controller:
                 # Chạy trong thread để không block UI
-                import threading
                 thread = threading.Thread(target=self.controller.open_project, args=(project,))
                 thread.daemon = True
                 thread.start()

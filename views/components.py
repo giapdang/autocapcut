@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 try:
     import customtkinter as ctk
+    from customtkinter import CTkImage
+    from PIL import Image
     CTK_AVAILABLE = True
 except ImportError:
     CTK_AVAILABLE = False
@@ -117,14 +119,11 @@ if CTK_AVAILABLE:
             """Thiết lập thumbnail nếu có."""
             try:
                 if self.project.thumbnail_path and os.path.exists(self.project.thumbnail_path):
-                    from PIL import Image
-                    
                     # Load và resize thumbnail
                     img = Image.open(self.project.thumbnail_path)
                     img.thumbnail((60, 60))  # Resize về 60x60
                     
                     # Convert sang CTkImage
-                    from customtkinter import CTkImage
                     self.thumbnail_image = CTkImage(light_image=img, dark_image=img, size=(60, 60))
                     
                     # Tạo label hiển thị thumbnail

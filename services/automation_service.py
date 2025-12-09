@@ -279,8 +279,6 @@ class AutomationService:
             True nếu thành công
         """
         try:
-            import os
-            
             # Tìm file project chính
             draft_path = project.get_draft_path()
             
@@ -345,7 +343,6 @@ class AutomationService:
                 
                 # Bước 3: Sử dụng keyboard shortcut để mở dialog
                 # Ctrl+O thường là shortcut để mở file
-                import pyautogui
                 pyautogui.hotkey('ctrl', 'o')
                 time.sleep(2)
                 
