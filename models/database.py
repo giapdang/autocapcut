@@ -267,9 +267,21 @@ class Database:
         if not kwargs:
             return False
 
-        # Xây dựng câu query
-        set_clause = ', '.join([f"{key} = ?" for key in kwargs.keys()])
-        values = list(kwargs.values())
+        # Whitelist allowed columns
+        allowed_columns = {
+            'project_id', 'project_name', 'started_at', 'completed_at',
+            'duration', 'status', 'error_message', 'screenshot_path', 'metadata'
+        }
+
+        # Filter to only allowed columns
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in allowed_columns}
+
+        if not filtered_kwargs:
+            return False
+
+        # Xây dựng câu query an toàn
+        set_clause = ', '.join([f"{key} = ?" for key in filtered_kwargs.keys()])
+        values = list(filtered_kwargs.values())
         values.append(history_id)
 
         with self._get_connection() as conn:

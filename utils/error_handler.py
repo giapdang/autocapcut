@@ -45,7 +45,12 @@ class ErrorInfo:
     exception: Optional[Exception] = None
     stack_trace: Optional[str] = None
     screenshot_path: Optional[str] = None
-    context: Dict[str, Any] = None
+    context: Optional[Dict[str, Any]] = None
+
+    def __post_init__(self):
+        """Initialize mutable defaults."""
+        if self.context is None:
+            self.context = {}
 
     def to_dict(self) -> Dict[str, Any]:
         """Chuyển đổi thành dictionary."""
@@ -56,7 +61,7 @@ class ErrorInfo:
             'exception': str(self.exception) if self.exception else None,
             'stack_trace': self.stack_trace,
             'screenshot_path': self.screenshot_path,
-            'context': self.context or {}
+            'context': self.context
         }
 
 
