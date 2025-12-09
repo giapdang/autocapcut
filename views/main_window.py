@@ -26,8 +26,8 @@ from views.components import (
 
 
 if CTK_AVAILABLE:
-    # Cấu hình CustomTkinter
-    ctk.set_appearance_mode("dark")
+    # Cấu hình CustomTkinter - đổi sang light mode
+    ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("blue")
 
 
@@ -57,6 +57,8 @@ if CTK_AVAILABLE:
 
             self.controller = controller
             self._project_items: List[ProjectItem] = []
+            self._all_projects: List[Project] = []  # Lưu tất cả projects
+            self._search_text: str = ""  # Text tìm kiếm
 
             self._setup_window()
             self._setup_ui()
@@ -91,26 +93,26 @@ if CTK_AVAILABLE:
 
         def _create_header(self) -> None:
             """Tạo header với tiêu đề."""
-            self.header_frame = ctk.CTkFrame(self, height=60)
+            self.header_frame = ctk.CTkFrame(self, height=80)
             self.header_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 5))
             self.header_frame.grid_columnconfigure(0, weight=1)
 
-            # Logo/Title
+            # Logo/Title - Tăng kích thước
             self.title_label = ctk.CTkLabel(
                 self.header_frame,
                 text="🎬 AutoCapCut",
-                font=ctk.CTkFont(size=24, weight="bold")
+                font=ctk.CTkFont(size=32, weight="bold")
             )
-            self.title_label.grid(row=0, column=0, sticky="w", padx=20, pady=10)
+            self.title_label.grid(row=0, column=0, sticky="w", padx=20, pady=(10, 0))
 
             # Subtitle
             self.subtitle_label = ctk.CTkLabel(
                 self.header_frame,
                 text="Công cụ tự động xuất video từ CapCut",
-                font=ctk.CTkFont(size=12),
+                font=ctk.CTkFont(size=14),
                 text_color="gray"
             )
-            self.subtitle_label.grid(row=0, column=1, sticky="e", padx=20, pady=10)
+            self.subtitle_label.grid(row=1, column=0, sticky="w", padx=20, pady=(0, 10))
 
         def _create_config_section(self) -> None:
             """Tạo phần cấu hình."""
@@ -166,23 +168,23 @@ if CTK_AVAILABLE:
             self.project_frame = ctk.CTkFrame(self)
             self.project_frame.grid(row=2, column=0, sticky="nsew", padx=10, pady=5)
             self.project_frame.grid_columnconfigure(0, weight=1)
-            self.project_frame.grid_rowconfigure(1, weight=1)
+            self.project_frame.grid_rowconfigure(2, weight=1)
 
             # Header với buttons
             header = ctk.CTkFrame(self.project_frame, fg_color="transparent")
             header.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-            header.grid_columnconfigure(0, weight=1)
+            header.grid_columnconfigure(1, weight=1)
 
             self.project_count_label = ctk.CTkLabel(
                 header,
                 text="Projects (0)",
-                font=ctk.CTkFont(size=14, weight="bold")
+                font=ctk.CTkFont(size=16, weight="bold")
             )
             self.project_count_label.grid(row=0, column=0, sticky="w")
 
             # Select All / Deselect All buttons
             btn_frame = ctk.CTkFrame(header, fg_color="transparent")
-            btn_frame.grid(row=0, column=1, sticky="e")
+            btn_frame.grid(row=0, column=2, sticky="e")
 
             self.select_all_btn = ctk.CTkButton(
                 btn_frame,
@@ -200,12 +202,45 @@ if CTK_AVAILABLE:
             )
             self.deselect_all_btn.pack(side="left", padx=2)
 
+            # Description label - thông báo về lọc project
+            self.info_label = ctk.CTkLabel(
+                self.project_frame,
+                text="ℹ️ Chỉ hiển thị project local hiện tại — không bao gồm trash hoặc cloud",
+                font=ctk.CTkFont(size=11),
+                text_color="gray",
+                anchor="w"
+            )
+            self.info_label.grid(row=1, column=0, sticky="w", padx=10, pady=(0, 5))
+
+            # Search bar
+            search_frame = ctk.CTkFrame(self.project_frame, fg_color="transparent")
+            search_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+            search_frame.grid_columnconfigure(0, weight=1)
+
+            self.search_entry = ctk.CTkEntry(
+                search_frame,
+                placeholder_text="🔍 Tìm kiếm project theo tên...",
+                font=ctk.CTkFont(size=12),
+                height=35
+            )
+            self.search_entry.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+            self.search_entry.bind("<KeyRelease>", self._on_search_changed)
+
+            self.clear_search_btn = ctk.CTkButton(
+                search_frame,
+                text="✖",
+                width=35,
+                height=35,
+                command=self._on_clear_search
+            )
+            self.clear_search_btn.grid(row=0, column=1)
+
             # Scrollable frame cho danh sách projects
             self.project_scroll = ctk.CTkScrollableFrame(
                 self.project_frame,
                 label_text=""
             )
-            self.project_scroll.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+            self.project_scroll.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
             self.project_scroll.grid_columnconfigure(0, weight=1)
 
         def _create_control_section(self) -> None:
@@ -338,6 +373,39 @@ if CTK_AVAILABLE:
             if self.controller:
                 self.controller.select_project(project, selected)
 
+        def _on_project_open(self, project: Project) -> None:
+            """Xử lý khi click nút Open project."""
+            if self.controller:
+                # Chạy trong thread để không block UI
+                import threading
+                thread = threading.Thread(target=self.controller.open_project, args=(project,))
+                thread.daemon = True
+                thread.start()
+
+        def _on_search_changed(self, event=None) -> None:
+            """Xử lý khi text tìm kiếm thay đổi."""
+            self._search_text = self.search_entry.get().lower()
+            self._filter_projects()
+
+        def _on_clear_search(self) -> None:
+            """Xử lý khi click clear search."""
+            self.search_entry.delete(0, "end")
+            self._search_text = ""
+            self._filter_projects()
+
+        def _filter_projects(self) -> None:
+            """Lọc danh sách projects theo text tìm kiếm."""
+            if not self._search_text:
+                # Hiển thị tất cả
+                self.update_project_list(self._all_projects)
+            else:
+                # Lọc theo tên
+                filtered = [
+                    p for p in self._all_projects
+                    if self._search_text in p.name.lower()
+                ]
+                self.update_project_list(filtered)
+
         # ==================== Public Methods ====================
 
         def log(self, message: str) -> None:
@@ -357,23 +425,33 @@ if CTK_AVAILABLE:
             Args:
                 projects: Danh sách Project objects
             """
+            # Lưu danh sách đầy đủ nếu không có search text
+            if not self._search_text:
+                self._all_projects = projects.copy()
+            
             # Xóa các items cũ
             for item in self._project_items:
                 item.destroy()
             self._project_items.clear()
 
-            # Tạo items mới
+            # Tạo items mới với on_open callback
             for i, project in enumerate(projects):
                 item = ProjectItem(
                     self.project_scroll,
                     project=project,
-                    on_select=self._on_project_select
+                    on_select=self._on_project_select,
+                    on_open=self._on_project_open
                 )
                 item.grid(row=i, column=0, sticky="ew", padx=5, pady=2)
                 self._project_items.append(item)
 
             # Cập nhật count label
-            self.project_count_label.configure(text=f"Projects ({len(projects)})")
+            total_count = len(self._all_projects)
+            shown_count = len(projects)
+            if self._search_text:
+                self.project_count_label.configure(text=f"Projects ({shown_count}/{total_count})")
+            else:
+                self.project_count_label.configure(text=f"Projects ({total_count})")
 
         def select_all_projects(self) -> None:
             """Chọn tất cả projects."""

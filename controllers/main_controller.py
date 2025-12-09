@@ -146,14 +146,58 @@ class MainController:
         if self.view:
             self.view.log("Đang tải danh sách projects...")
 
-        # Tải projects (không bao gồm trash)
-        self._projects = self.capcut_service.get_projects(include_trash=False)
+        # Tải projects (không bao gồm trash và cloud)
+        self._projects = self.capcut_service.get_projects(
+            include_trash=False, 
+            include_cloud=False
+        )
 
         if self.view:
             self.view.log(f"Tìm thấy {len(self._projects)} project(s)")
             self.view.update_project_list(self._projects)
 
         return self._projects
+
+    def open_project(self, project: Project) -> bool:
+        """
+        Mở một project trong CapCut.
+        
+        Args:
+            project: Project cần mở
+            
+        Returns:
+            True nếu mở thành công
+        """
+        if not self.config.capcut_exe_path:
+            if self.view:
+                self.view.show_error("Vui lòng cấu hình đường dẫn CapCut.exe")
+            return False
+        
+        if self.view:
+            self.view.log(f"Đang mở project: {project.name}")
+        
+        # Import automation service
+        from services.automation_service import AutomationService
+        
+        # Tạo automation service để mở project
+        automation = AutomationService(
+            capcut_exe_path=self.config.capcut_exe_path,
+            log_callback=self._on_export_log if self.view else print
+        )
+        
+        # Thử mở project
+        success = automation.open_project(project)
+        
+        if success:
+            if self.view:
+                self.view.log(f"✓ Đã mở project: {project.name}")
+                self.view.show_info(f"Đã mở project: {project.name}")
+        else:
+            if self.view:
+                self.view.log(f"✗ Không thể mở project: {project.name}")
+                self.view.show_warning(f"Không thể mở project: {project.name}")
+        
+        return success
 
     def get_projects(self) -> List[Project]:
         """

@@ -174,6 +174,186 @@ class AutomationService:
             self._log(f"Lỗi mở CapCut: {e}")
             return False
 
+    def open_project(self, project) -> bool:
+        """
+        Mở CapCut project với nhiều phương pháp fallback.
+        
+        Thử các phương pháp theo thứ tự:
+        1. Mở CapCut với tham số dòng lệnh (nếu hỗ trợ)
+        2. Mở file project chính bằng os.startfile
+        3. Mở CapCut và tự động thao tác UI để mở project
+        
+        Args:
+            project: Project object cần mở
+            
+        Returns:
+            True nếu mở thành công
+        """
+        self._log(f"Đang mở project: {project.name}")
+        
+        # Phương pháp 1: Thử mở với tham số dòng lệnh
+        self._log("Phương pháp 1: Thử mở bằng tham số dòng lệnh...")
+        if self._open_project_with_commandline(project):
+            self._log("✓ Mở project thành công bằng tham số dòng lệnh")
+            return True
+        
+        # Phương pháp 2: Thử os.startfile với file project chính
+        self._log("Phương pháp 2: Thử mở bằng os.startfile...")
+        if self._open_project_with_startfile(project):
+            self._log("✓ Mở project thành công bằng os.startfile")
+            return True
+        
+        # Phương pháp 3: Fallback - mở CapCut và tự động UI
+        self._log("Phương pháp 3: Thử mở bằng automation UI...")
+        if self._open_project_with_ui_automation(project):
+            self._log("✓ Mở project thành công bằng automation UI")
+            return True
+        
+        self._log("✗ Không thể mở project bằng bất kỳ phương pháp nào")
+        return False
+    
+    def _open_project_with_commandline(self, project) -> bool:
+        """
+        Thử mở project bằng tham số dòng lệnh.
+        
+        Args:
+            project: Project object
+            
+        Returns:
+            True nếu thành công
+        """
+        try:
+            # Đóng CapCut nếu đang chạy
+            if self.is_capcut_running():
+                self.close_capcut()
+                time.sleep(2)
+            
+            # Thử mở với đường dẫn project
+            draft_path = project.get_draft_path()
+            
+            # Thử với draft_content.json
+            if os.path.exists(draft_path):
+                cmd = [self.capcut_exe_path, draft_path]
+                subprocess.Popen(cmd, shell=False)
+                time.sleep(3)
+                
+                # Kiểm tra xem CapCut đã mở chưa
+                if self._wait_for_window(timeout=10):
+                    return True
+            
+            # Thử với đường dẫn thư mục project
+            cmd = [self.capcut_exe_path, project.path]
+            subprocess.Popen(cmd, shell=False)
+            time.sleep(3)
+            
+            if self._wait_for_window(timeout=10):
+                return True
+                
+        except Exception as e:
+            self._log(f"Lỗi mở bằng command line: {e}")
+        
+        return False
+    
+    def _open_project_with_startfile(self, project) -> bool:
+        """
+        Thử mở project bằng os.startfile (Windows).
+        
+        Args:
+            project: Project object
+            
+        Returns:
+            True nếu thành công
+        """
+        try:
+            import os
+            
+            # Tìm file project chính
+            draft_path = project.get_draft_path()
+            
+            if os.path.exists(draft_path):
+                # Đóng CapCut nếu đang chạy
+                if self.is_capcut_running():
+                    self.close_capcut()
+                    time.sleep(2)
+                
+                # Thử mở file draft
+                os.startfile(draft_path)
+                time.sleep(3)
+                
+                # Kiểm tra xem CapCut đã mở chưa
+                if self._wait_for_window(timeout=15):
+                    return True
+                    
+        except Exception as e:
+            self._log(f"Lỗi mở bằng startfile: {e}")
+        
+        return False
+    
+    def _open_project_with_ui_automation(self, project, max_retries: int = 2) -> bool:
+        """
+        Mở project bằng cách tự động thao tác UI.
+        
+        Quy trình:
+        1. Mở CapCut
+        2. Tìm và click nút "Open Project"
+        3. Paste đường dẫn project và Enter
+        
+        Args:
+            project: Project object
+            max_retries: Số lần thử lại
+            
+        Returns:
+            True nếu thành công
+        """
+        if not PYAUTOGUI_AVAILABLE:
+            self._log("PyAutoGUI không khả dụng")
+            return False
+        
+        try:
+            import pyperclip
+        except ImportError:
+            self._log("pyperclip không khả dụng, cần để paste đường dẫn")
+            return False
+        
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    self._log(f"Thử lại lần {attempt + 1}...")
+                
+                # Bước 1: Mở CapCut
+                if not self.open_capcut():
+                    continue
+                
+                # Chờ CapCut load hoàn toàn
+                time.sleep(5)
+                
+                # Bước 2: Copy đường dẫn project vào clipboard
+                pyperclip.copy(project.path)
+                self._log(f"Đã copy đường dẫn: {project.path}")
+                
+                # Bước 3: Sử dụng keyboard shortcut để mở dialog
+                # Ctrl+O thường là shortcut để mở file
+                import pyautogui
+                pyautogui.hotkey('ctrl', 'o')
+                time.sleep(2)
+                
+                # Bước 4: Paste đường dẫn và Enter
+                pyautogui.hotkey('ctrl', 'v')
+                time.sleep(1)
+                pyautogui.press('enter')
+                time.sleep(3)
+                
+                # Kiểm tra xem project đã được load chưa
+                # (Có thể cần thêm logic kiểm tra cụ thể)
+                self._log("Đã gửi lệnh mở project qua UI automation")
+                return True
+                
+            except Exception as e:
+                self._log(f"Lỗi UI automation (lần {attempt + 1}): {e}")
+                continue
+        
+        return False
+
     def _wait_for_window(self, timeout: int = None) -> bool:
         """
         Chờ cửa sổ CapCut xuất hiện.

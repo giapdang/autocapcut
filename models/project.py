@@ -26,6 +26,9 @@ class Project:
         created_date: Ngày tạo project
         modified_date: Ngày chỉnh sửa cuối cùng
         is_trash: Project có trong thùng rác hay không
+        is_cloud: Project có phải là cloud project không
+        thumbnail_path: Đường dẫn đến thumbnail (nếu có)
+        metadata: Dictionary chứa metadata từ file draft
     """
     id: str
     name: str
@@ -33,6 +36,8 @@ class Project:
     created_date: Optional[datetime] = None
     modified_date: Optional[datetime] = None
     is_trash: bool = False
+    is_cloud: bool = False
+    thumbnail_path: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -40,8 +45,8 @@ class Project:
         """
         Tạo Project từ thư mục project.
 
-        Đọc metadata từ draft_content.json hoặc draft_info.json
-        để lấy thông tin về project.
+        Đọc metadata từ draft_content.json, draft_info.json, project.json,
+        hoặc metadata.json để lấy thông tin về project.
 
         Args:
             folder_path: Đường dẫn đến thư mục project
@@ -60,63 +65,105 @@ class Project:
         created_date = None
         modified_date = None
         is_trash = False
+        is_cloud = False
+        thumbnail_path = None
         metadata = {}
 
-        # Thử đọc draft_info.json trước
-        draft_info_path = os.path.join(folder_path, 'draft_info.json')
-        draft_content_path = os.path.join(folder_path, 'draft_content.json')
+        # Thử đọc các file metadata với thứ tự ưu tiên
+        metadata_files = [
+            'draft_info.json',
+            'draft_content.json',
+            'project.json',
+            'metadata.json'
+        ]
 
-        try:
-            # Đọc draft_info.json nếu tồn tại
-            if os.path.exists(draft_info_path):
-                with open(draft_info_path, 'r', encoding='utf-8') as f:
-                    info = json.load(f)
-                    name = info.get('draft_name', name)
+        for metadata_file in metadata_files:
+            metadata_path = os.path.join(folder_path, metadata_file)
+            if os.path.exists(metadata_path):
+                try:
+                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                        info = json.load(f)
+                        
+                        # Lấy tên project
+                        name = info.get('draft_name') or info.get('name') or name
 
-                    # Parse ngày tạo (timestamp milliseconds)
-                    if 'tm_draft_create' in info:
-                        created_date = datetime.fromtimestamp(
-                            info['tm_draft_create'] / 1000
+                        # Parse ngày tạo (timestamp milliseconds)
+                        if 'tm_draft_create' in info:
+                            created_date = datetime.fromtimestamp(
+                                info['tm_draft_create'] / 1000
+                            )
+                        elif 'created_time' in info:
+                            created_date = datetime.fromtimestamp(
+                                info['created_time'] / 1000
+                            )
+
+                        # Parse ngày chỉnh sửa
+                        if 'tm_draft_modified' in info:
+                            modified_date = datetime.fromtimestamp(
+                                info['tm_draft_modified'] / 1000
+                            )
+                        elif 'modified_time' in info or 'last_modified' in info:
+                            mod_time = info.get('modified_time') or info.get('last_modified')
+                            modified_date = datetime.fromtimestamp(mod_time / 1000)
+
+                        # Kiểm tra trạng thái trash - nhiều tên trường khác nhau
+                        is_trash = (
+                            info.get('draft_is_deleted', False) or
+                            info.get('is_trash', False) or
+                            info.get('is_deleted', False) or
+                            info.get('trashed', False) or
+                            info.get('archived', False)
                         )
 
-                    # Parse ngày chỉnh sửa
-                    if 'tm_draft_modified' in info:
-                        modified_date = datetime.fromtimestamp(
-                            info['tm_draft_modified'] / 1000
+                        # Kiểm tra cloud project - lọc bỏ project online
+                        is_cloud = (
+                            info.get('is_cloud', False) or
+                            info.get('is_online', False) or
+                            info.get('online', False) or
+                            info.get('cloud_synced', False)
                         )
 
-                    # Kiểm tra trạng thái trash
-                    is_trash = info.get('draft_is_deleted', False)
+                        # Lấy thumbnail nếu có
+                        if 'cover_path' in info:
+                            thumb = os.path.join(folder_path, info['cover_path'])
+                            if os.path.exists(thumb):
+                                thumbnail_path = thumb
+                        elif 'thumbnail' in info:
+                            thumb = os.path.join(folder_path, info['thumbnail'])
+                            if os.path.exists(thumb):
+                                thumbnail_path = thumb
 
-                    metadata = info
+                        metadata = info
+                        break  # Đã tìm thấy metadata, dừng tìm kiếm
 
-            # Nếu không có draft_info.json, thử đọc draft_content.json
-            elif os.path.exists(draft_content_path):
-                with open(draft_content_path, 'r', encoding='utf-8') as f:
-                    content = json.load(f)
-                    name = content.get('name', name)
-                    metadata = content
+                except (json.JSONDecodeError, OSError, KeyError) as e:
+                    # Log lỗi nhưng vẫn tiếp tục thử file khác
+                    print(f"Lỗi đọc metadata từ {metadata_path}: {e}")
+                    continue
 
-            # Nếu không có metadata, sử dụng thời gian file system
-            if created_date is None:
-                stat = os.stat(folder_path)
-                created_date = datetime.fromtimestamp(stat.st_ctime)
-
-            if modified_date is None:
-                stat = os.stat(folder_path)
-                modified_date = datetime.fromtimestamp(stat.st_mtime)
-
-        except (json.JSONDecodeError, OSError, KeyError) as e:
-            # Log lỗi nhưng vẫn tạo project với thông tin cơ bản
-            print(f"Lỗi đọc metadata cho project {folder_path}: {e}")
-
+        # Nếu không có metadata, sử dụng thời gian file system
+        if created_date is None or modified_date is None:
             try:
                 stat = os.stat(folder_path)
-                created_date = datetime.fromtimestamp(stat.st_ctime)
-                modified_date = datetime.fromtimestamp(stat.st_mtime)
+                if created_date is None:
+                    created_date = datetime.fromtimestamp(stat.st_ctime)
+                if modified_date is None:
+                    modified_date = datetime.fromtimestamp(stat.st_mtime)
             except OSError:
-                created_date = datetime.now()
-                modified_date = datetime.now()
+                created_date = created_date or datetime.now()
+                modified_date = modified_date or datetime.now()
+
+        # Tìm thumbnail trong các vị trí phổ biến nếu chưa có
+        if thumbnail_path is None:
+            possible_thumbs = [
+                'cover.jpg', 'cover.png', 'thumbnail.jpg', 
+                'thumbnail.png', 'preview.jpg', 'preview.png'
+            ]
+            for thumb_name in possible_thumbs:
+                thumb = os.path.join(folder_path, thumb_name)
+                if os.path.exists(thumb):
+                    thumbnail_path = thumb
+                    break
 
         return cls(
             id=project_id,
@@ -125,6 +172,8 @@ class Project:
             created_date=created_date,
             modified_date=modified_date,
             is_trash=is_trash,
+            is_cloud=is_cloud,
+            thumbnail_path=thumbnail_path,
             metadata=metadata
         )
 
@@ -142,6 +191,8 @@ class Project:
             'created_date': self.created_date.isoformat() if self.created_date else None,
             'modified_date': self.modified_date.isoformat() if self.modified_date else None,
             'is_trash': self.is_trash,
+            'is_cloud': self.is_cloud,
+            'thumbnail_path': self.thumbnail_path,
             'metadata': self.metadata
         }
 
