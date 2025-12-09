@@ -9,10 +9,14 @@ Service này cung cấp các chức năng:
 """
 
 import os
+import logging
 from typing import Optional, List
 from models.project import Project
 from models.config import Config
 from services.file_service import FileService
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class CapCutService:
@@ -122,7 +126,7 @@ class CapCutService:
         # Tìm thư mục data
         data_folder = self.find_data_folder()
         if not data_folder:
-            print("Không tìm thấy thư mục data CapCut")
+            logger.warning("Không tìm thấy thư mục data CapCut")
             return projects
 
         # Danh sách các thư mục cần quét
@@ -140,14 +144,14 @@ class CapCutService:
             if os.path.isdir(subfolder) and subfolder not in folders_to_scan:
                 folders_to_scan.append(subfolder)
 
-        print(f"Quét {len(folders_to_scan)} thư mục để tìm projects...")
+        logger.info(f"Quét {len(folders_to_scan)} thư mục để tìm projects...")
 
         # Quét từng thư mục
         for scan_folder in folders_to_scan:
             if not os.path.isdir(scan_folder):
                 continue
                 
-            print(f"Đang quét: {scan_folder}")
+            logger.debug(f"Đang quét: {scan_folder}")
             
             # Liệt kê các folder con (mỗi folder là một project)
             project_folders = self.file_service.list_folders(scan_folder)
@@ -161,30 +165,30 @@ class CapCutService:
                 # Kiểm tra xem folder có chứa metadata không
                 has_metadata = self._has_project_metadata(folder_path)
                 if not has_metadata:
-                    print(f"Bỏ qua {folder_path}: không tìm thấy metadata")
+                    logger.debug(f"Bỏ qua {folder_path}: không tìm thấy metadata")
                     continue
                 
                 project = Project.from_folder(folder_path)
                 if project:
                     # Lọc theo các tiêu chí
                     if not include_trash and project.is_trash:
-                        print(f"Bỏ qua {project.name}: project trong thùng rác")
+                        logger.info(f"Bỏ qua {project.name}: project trong thùng rác")
                         continue
                     
                     if not include_cloud and project.is_cloud:
-                        print(f"Bỏ qua {project.name}: cloud project")
+                        logger.info(f"Bỏ qua {project.name}: cloud project")
                         continue
                     
                     # Kiểm tra file draft_content.json tồn tại (bắt buộc để export)
                     draft_path = project.get_draft_path()
                     if not os.path.exists(draft_path):
-                        print(f"Bỏ qua {project.name}: thiếu file draft_content.json")
+                        logger.info(f"Bỏ qua {project.name}: thiếu file draft_content.json")
                         continue
                     
-                    print(f"Tìm thấy project: {project.name}")
+                    logger.info(f"Tìm thấy project: {project.name}")
                     projects.append(project)
                 else:
-                    print(f"Không thể tạo project từ {folder_path}")
+                    logger.warning(f"Không thể tạo project từ {folder_path}")
 
         # Sắp xếp theo ngày chỉnh sửa (mới nhất trước)
         projects.sort(
@@ -192,7 +196,7 @@ class CapCutService:
             reverse=True
         )
 
-        print(f"Tổng cộng tìm thấy {len(projects)} project hợp lệ")
+        logger.info(f"Tổng cộng tìm thấy {len(projects)} project hợp lệ")
         return projects
 
     def _has_project_metadata(self, folder_path: str) -> bool:

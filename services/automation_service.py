@@ -11,8 +11,12 @@ Service này sử dụng PyAutoGUI và pywinauto để:
 import os
 import time
 import subprocess
+import logging
 from typing import Optional, Callable
 from enum import Enum
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # Import các thư viện automation (sẽ được cài đặt qua requirements.txt)
 try:
@@ -20,12 +24,14 @@ try:
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
+    logger.warning("psutil not available")
 
 try:
     import pyautogui  # noqa: F401
     PYAUTOGUI_AVAILABLE = True
 except ImportError:
     PYAUTOGUI_AVAILABLE = False
+    logger.warning("pyautogui not available")
 
 try:
     from pywinauto import Application
@@ -33,6 +39,14 @@ try:
     PYWINAUTO_AVAILABLE = True
 except ImportError:
     PYWINAUTO_AVAILABLE = False
+    logger.warning("pywinauto not available")
+
+try:
+    import pyperclip
+    PYPERCLIP_AVAILABLE = True
+except ImportError:
+    PYPERCLIP_AVAILABLE = False
+    logger.warning("pyperclip not available")
 
 
 class ExportStatus(Enum):
@@ -309,9 +323,7 @@ class AutomationService:
             self._log("PyAutoGUI không khả dụng")
             return False
         
-        try:
-            import pyperclip
-        except ImportError:
+        if not PYPERCLIP_AVAILABLE:
             self._log("pyperclip không khả dụng, cần để paste đường dẫn")
             return False
         

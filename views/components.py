@@ -8,8 +8,12 @@ Module này chứa các widget tùy chỉnh:
 """
 
 import os
+import logging
 from typing import Optional, Callable
 from datetime import datetime
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 try:
     import customtkinter as ctk
@@ -144,7 +148,7 @@ if CTK_AVAILABLE:
                     self.thumbnail_label.grid(row=0, column=1, rowspan=2, padx=5, pady=5)
             except Exception as e:
                 # Nếu lỗi, hiển thị icon mặc định
-                print(f"Lỗi load thumbnail: {e}")
+                logger.warning(f"Lỗi load thumbnail cho {self.project.name}: {e}")
                 self.thumbnail_label = ctk.CTkLabel(
                     self,
                     text="🎬",

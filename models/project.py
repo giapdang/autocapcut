@@ -9,9 +9,13 @@ Model này chứa thông tin về project bao gồm:
 
 import os
 import json
+import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass, field
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -138,7 +142,7 @@ class Project:
 
                 except (json.JSONDecodeError, OSError, KeyError) as e:
                     # Log lỗi nhưng vẫn tiếp tục thử file khác
-                    print(f"Lỗi đọc metadata từ {metadata_path}: {e}")
+                    logger.warning(f"Lỗi đọc metadata từ {metadata_path}: {e}")
                     continue
 
         # Nếu không có metadata, sử dụng thời gian file system
