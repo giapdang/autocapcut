@@ -14,9 +14,14 @@
 
 ## ✨ Tính năng
 
-- **Giao diện hiện đại**: Sử dụng CustomTkinter để tạo giao diện đẹp mắt, hỗ trợ dark mode
+- **Giao diện hiện đại**: Sử dụng CustomTkinter với theme sáng, giao diện đẹp mắt, dễ nhìn
 - **Tự động phát hiện**: Tự động tìm đường dẫn CapCut.exe và thư mục data
-- **Quản lý project**: Hiển thị danh sách tất cả projects với thông tin chi tiết
+- **Quản lý project nâng cao**: 
+  - Hiển thị danh sách projects với thông tin chi tiết và thumbnail
+  - Tìm kiếm/lọc projects theo tên
+  - Chỉ hiển thị projects local hiện tại (lọc bỏ trash và cloud)
+  - Sắp xếp theo ngày sửa đổi (mới nhất trước)
+- **Mở project trong CapCut**: Click nút "Open" để mở project trực tiếp trong CapCut
 - **Xuất hàng loạt**: Chọn nhiều projects và xuất tự động
 - **Theo dõi tiến trình**: Progress bar và log chi tiết
 - **Lưu cấu hình**: Tự động lưu cấu hình cho lần sử dụng sau
@@ -78,16 +83,29 @@ python main.py
 
 1. Click nút **"Load Projects"**
 2. Danh sách projects sẽ hiển thị với:
+   - Thumbnail (hình thu nhỏ)
    - Tên project
    - Ngày tạo
    - Ngày chỉnh sửa gần nhất
+   - Nút "Open" để mở project
+3. Sử dụng thanh tìm kiếm để lọc projects theo tên
+4. **Lưu ý**: Chỉ hiển thị projects local hiện tại, không bao gồm projects trong thùng rác hoặc cloud
 
-### Bước 3: Chọn projects
+### Bước 3: Mở project trong CapCut
+
+1. Click nút **"📂 Open"** bên cạnh project muốn mở
+2. Tool sẽ tự động:
+   - Thử mở project bằng tham số dòng lệnh
+   - Nếu không được, thử mở bằng file project
+   - Nếu vẫn không được, tự động thao tác UI để mở project
+3. CapCut sẽ được mở với project đã chọn
+
+### Bước 4: Chọn projects để xuất
 
 1. Tick chọn các projects muốn xuất
 2. Có thể dùng **"Chọn tất cả"** hoặc **"Bỏ chọn"**
 
-### Bước 4: Xuất video
+### Bước 5: Xuất video
 
 1. Click nút **"Export Selected"**
 2. Tool sẽ tự động:
@@ -98,7 +116,7 @@ python main.py
 
 3. Theo dõi tiến trình qua progress bar và log
 
-### Bước 5: Hoàn thành
+### Bước 6: Hoàn thành
 
 - Khi xuất xong, sẽ có thông báo hoàn thành
 - Video được lưu theo cài đặt mặc định của CapCut
@@ -163,11 +181,21 @@ File `config/settings.json` chứa cấu hình:
 
 ### Lỗi: "Không có project nào"
 
-**Nguyên nhân**: Thư mục data không đúng hoặc chưa có project
+**Nguyên nhân**: Thư mục data không đúng hoặc chưa có project, hoặc tất cả projects đều trong trash/cloud
 **Giải pháp**:
 1. Kiểm tra đường dẫn thư mục data
-2. Đảm bảo đã tạo ít nhất một project trong CapCut
-3. Thử dùng Auto-detect
+2. Đảm bảo đã tạo ít nhất một project local trong CapCut (không phải cloud project)
+3. Kiểm tra log để xem lý do project bị bỏ qua
+4. Thử dùng Auto-detect
+
+### Lỗi: "Không thể mở project"
+
+**Nguyên nhân**: CapCut không hỗ trợ tham số dòng lệnh hoặc UI automation không hoạt động
+**Giải pháp**:
+1. Thử mở project thủ công trong CapCut để xác nhận project còn tồn tại
+2. Kiểm tra log để xem phương pháp nào đã được thử
+3. Đảm bảo đã cài đặt pyperclip: `pip install pyperclip`
+4. Nếu UI automation không hoạt động, có thể cần điều chỉnh tọa độ click trong code
 
 ### Lỗi: "ModuleNotFoundError"
 
@@ -206,6 +234,9 @@ pip install customtkinter
 - Cần đóng CapCut trước khi chạy export
 - Video được lưu theo cài đặt mặc định của CapCut
 - Không nên sử dụng máy tính khi đang export
+- Tool tự động lọc bỏ projects trong thùng rác và cloud projects
+- Projects được quét từ nhiều thư mục: Projects, User Data/Projects, AutoSave
+- Chức năng mở project hỗ trợ nhiều phương pháp fallback để tương thích với các phiên bản CapCut khác nhau
 
 ## 🤝 Đóng góp
 

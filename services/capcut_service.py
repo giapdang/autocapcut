@@ -9,10 +9,14 @@ Service này cung cấp các chức năng:
 """
 
 import os
+import logging
 from typing import Optional, List
 from models.project import Project
 from models.config import Config
 from services.file_service import FileService
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 class CapCutService:
@@ -31,6 +35,7 @@ class CapCutService:
         os.path.expanduser(r"~\AppData\Local\Programs\CapCut\CapCut.exe"),
     ]
 
+    # Các thư mục data có thể có - quét nhiều cấu trúc
     DEFAULT_DATA_PATHS = [
         os.path.expanduser(
             r"~\AppData\Local\JianyingPro\User Data\Projects\com.lveditor.draft"
@@ -38,6 +43,13 @@ class CapCutService:
         os.path.expanduser(
             r"~\AppData\Local\CapCut\User Data\Projects\com.lveditor.draft"
         ),
+        # Thêm các đường dẫn khác
+        os.path.expanduser(r"~\AppData\Local\JianyingPro\User Data\Projects"),
+        os.path.expanduser(r"~\AppData\Local\CapCut\User Data\Projects"),
+        os.path.expanduser(r"~\AppData\Local\JianyingPro\Projects"),
+        os.path.expanduser(r"~\AppData\Local\CapCut\Projects"),
+        os.path.expanduser(r"~\AppData\Local\JianyingPro\AutoSave"),
+        os.path.expanduser(r"~\AppData\Local\CapCut\AutoSave"),
     ]
 
     def __init__(self, config: Optional[Config] = None):
@@ -94,34 +106,89 @@ class CapCutService:
 
         return None
 
-    def get_projects(self, include_trash: bool = False) -> List[Project]:
+    def get_projects(self, include_trash: bool = False, include_cloud: bool = False) -> List[Project]:
         """
         Lấy danh sách các project CapCut.
 
         Đọc từ thư mục data và parse metadata của từng project.
+        Quét nhiều cấu trúc thư mục và lọc theo các tiêu chí.
 
         Args:
             include_trash: Có bao gồm project trong thùng rác không
+            include_cloud: Có bao gồm cloud project không
 
         Returns:
             Danh sách Project objects
         """
         projects = []
+        scanned_paths = set()  # Tránh quét trùng lặp
 
         # Tìm thư mục data
         data_folder = self.find_data_folder()
         if not data_folder:
+            logger.warning("Không tìm thấy thư mục data CapCut")
             return projects
 
-        # Liệt kê các folder con (mỗi folder là một project)
-        project_folders = self.file_service.list_folders(data_folder)
+        # Danh sách các thư mục cần quét
+        folders_to_scan = [data_folder]
+        
+        # Thêm các thư mục con phổ biến nếu tồn tại
+        parent_folder = os.path.dirname(data_folder)
+        possible_subfolders = [
+            os.path.join(parent_folder, 'Projects'),
+            os.path.join(parent_folder, 'AutoSave'),
+            os.path.join(parent_folder, 'com.lveditor.draft'),
+        ]
+        
+        for subfolder in possible_subfolders:
+            if os.path.isdir(subfolder) and subfolder not in folders_to_scan:
+                folders_to_scan.append(subfolder)
 
-        for folder_path in project_folders:
-            project = Project.from_folder(folder_path)
-            if project:
-                # Lọc bỏ project trong thùng rác nếu cần
-                if include_trash or not project.is_trash:
+        logger.info(f"Quét {len(folders_to_scan)} thư mục để tìm projects...")
+
+        # Quét từng thư mục
+        for scan_folder in folders_to_scan:
+            if not os.path.isdir(scan_folder):
+                continue
+                
+            logger.debug(f"Đang quét: {scan_folder}")
+            
+            # Liệt kê các folder con (mỗi folder là một project)
+            project_folders = self.file_service.list_folders(scan_folder)
+            
+            for folder_path in project_folders:
+                # Tránh quét trùng
+                if folder_path in scanned_paths:
+                    continue
+                scanned_paths.add(folder_path)
+                
+                # Kiểm tra xem folder có chứa metadata không
+                has_metadata = self._has_project_metadata(folder_path)
+                if not has_metadata:
+                    logger.debug(f"Bỏ qua {folder_path}: không tìm thấy metadata")
+                    continue
+                
+                project = Project.from_folder(folder_path)
+                if project:
+                    # Lọc theo các tiêu chí
+                    if not include_trash and project.is_trash:
+                        logger.info(f"Bỏ qua {project.name}: project trong thùng rác")
+                        continue
+                    
+                    if not include_cloud and project.is_cloud:
+                        logger.info(f"Bỏ qua {project.name}: cloud project")
+                        continue
+                    
+                    # Kiểm tra file draft_content.json tồn tại (bắt buộc để export)
+                    draft_path = project.get_draft_path()
+                    if not os.path.exists(draft_path):
+                        logger.info(f"Bỏ qua {project.name}: thiếu file draft_content.json")
+                        continue
+                    
+                    logger.info(f"Tìm thấy project: {project.name}")
                     projects.append(project)
+                else:
+                    logger.warning(f"Không thể tạo project từ {folder_path}")
 
         # Sắp xếp theo ngày chỉnh sửa (mới nhất trước)
         projects.sort(
@@ -129,7 +196,31 @@ class CapCutService:
             reverse=True
         )
 
+        logger.info(f"Tổng cộng tìm thấy {len(projects)} project hợp lệ")
         return projects
+
+    def _has_project_metadata(self, folder_path: str) -> bool:
+        """
+        Kiểm tra folder có chứa file metadata của project không.
+        
+        Args:
+            folder_path: Đường dẫn đến folder
+            
+        Returns:
+            True nếu có ít nhất một file metadata
+        """
+        metadata_files = [
+            'draft_info.json',
+            'draft_content.json',
+            'project.json',
+            'metadata.json'
+        ]
+        
+        for metadata_file in metadata_files:
+            if os.path.exists(os.path.join(folder_path, metadata_file)):
+                return True
+        
+        return False
 
     def get_project_by_id(self, project_id: str) -> Optional[Project]:
         """

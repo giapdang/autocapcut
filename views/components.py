@@ -7,11 +7,18 @@ Module này chứa các widget tùy chỉnh:
 - ProgressWidget: Hiển thị tiến trình
 """
 
+import os
+import logging
 from typing import Optional, Callable
 from datetime import datetime
 
+# Setup logger
+logger = logging.getLogger(__name__)
+
 try:
     import customtkinter as ctk
+    from customtkinter import CTkImage
+    from PIL import Image
     CTK_AVAILABLE = True
 except ImportError:
     CTK_AVAILABLE = False
@@ -26,10 +33,10 @@ from utils.helpers import format_datetime, get_relative_time
 if CTK_AVAILABLE:
     class ProjectItem(ctk.CTkFrame):
         """
-        Widget hiển thị một project với checkbox.
+        Widget hiển thị một project với checkbox, thumbnail và nút Open.
 
-        Hiển thị tên project, ngày tạo, ngày chỉnh sửa
-        và checkbox để chọn.
+        Hiển thị tên project, ngày tạo, ngày chỉnh sửa,
+        thumbnail (nếu có), checkbox để chọn và nút Open.
         """
 
         def __init__(
@@ -37,6 +44,7 @@ if CTK_AVAILABLE:
             master,
             project: Project,
             on_select: Optional[Callable[[Project, bool], None]] = None,
+            on_open: Optional[Callable[[Project], None]] = None,
             **kwargs
         ):
             """
@@ -46,19 +54,22 @@ if CTK_AVAILABLE:
                 master: Parent widget
                 project: Project object
                 on_select: Callback khi chọn/bỏ chọn (project, selected)
+                on_open: Callback khi click nút Open (project)
             """
             super().__init__(master, **kwargs)
 
             self.project = project
             self.on_select = on_select
+            self.on_open = on_open
             self.selected = ctk.BooleanVar(value=False)
+            self.thumbnail_image = None
 
             self._setup_ui()
 
         def _setup_ui(self) -> None:
             """Thiết lập giao diện."""
             # Configure grid
-            self.grid_columnconfigure(1, weight=1)
+            self.grid_columnconfigure(2, weight=1)
 
             # Checkbox
             self.checkbox = ctk.CTkCheckBox(
@@ -70,6 +81,9 @@ if CTK_AVAILABLE:
             )
             self.checkbox.grid(row=0, column=0, rowspan=2, padx=(10, 5), pady=5)
 
+            # Thumbnail (nếu có)
+            self._setup_thumbnail()
+
             # Tên project
             self.name_label = ctk.CTkLabel(
                 self,
@@ -77,7 +91,7 @@ if CTK_AVAILABLE:
                 font=ctk.CTkFont(size=14, weight="bold"),
                 anchor="w"
             )
-            self.name_label.grid(row=0, column=1, sticky="w", padx=5, pady=(5, 0))
+            self.name_label.grid(row=0, column=2, sticky="w", padx=5, pady=(5, 0))
 
             # Thông tin ngày tháng
             date_info = self._format_date_info()
@@ -88,7 +102,60 @@ if CTK_AVAILABLE:
                 text_color="gray",
                 anchor="w"
             )
-            self.date_label.grid(row=1, column=1, sticky="w", padx=5, pady=(0, 5))
+            self.date_label.grid(row=1, column=2, sticky="w", padx=5, pady=(0, 5))
+
+            # Nút Open
+            self.open_button = ctk.CTkButton(
+                self,
+                text="📂 Open",
+                width=80,
+                height=32,
+                font=ctk.CTkFont(size=11),
+                command=self._on_open_clicked
+            )
+            self.open_button.grid(row=0, column=3, rowspan=2, padx=(5, 10), pady=5)
+
+        def _setup_thumbnail(self) -> None:
+            """Thiết lập thumbnail nếu có."""
+            try:
+                if self.project.thumbnail_path and os.path.exists(self.project.thumbnail_path):
+                    # Load và resize thumbnail
+                    img = Image.open(self.project.thumbnail_path)
+                    img.thumbnail((60, 60))  # Resize về 60x60
+                    
+                    # Convert sang CTkImage
+                    self.thumbnail_image = CTkImage(light_image=img, dark_image=img, size=(60, 60))
+                    
+                    # Tạo label hiển thị thumbnail
+                    self.thumbnail_label = ctk.CTkLabel(
+                        self,
+                        text="",
+                        image=self.thumbnail_image,
+                        width=60,
+                        height=60
+                    )
+                    self.thumbnail_label.grid(row=0, column=1, rowspan=2, padx=5, pady=5)
+                else:
+                    # Hiển thị icon mặc định nếu không có thumbnail
+                    self.thumbnail_label = ctk.CTkLabel(
+                        self,
+                        text="🎬",
+                        font=ctk.CTkFont(size=40),
+                        width=60,
+                        height=60
+                    )
+                    self.thumbnail_label.grid(row=0, column=1, rowspan=2, padx=5, pady=5)
+            except Exception as e:
+                # Nếu lỗi, hiển thị icon mặc định
+                logger.warning(f"Lỗi load thumbnail cho {self.project.name}: {e}")
+                self.thumbnail_label = ctk.CTkLabel(
+                    self,
+                    text="🎬",
+                    font=ctk.CTkFont(size=40),
+                    width=60,
+                    height=60
+                )
+                self.thumbnail_label.grid(row=0, column=1, rowspan=2, padx=5, pady=5)
 
         def _format_date_info(self) -> str:
             """Format thông tin ngày tháng."""
@@ -100,6 +167,11 @@ if CTK_AVAILABLE:
             """Xử lý khi checkbox thay đổi."""
             if self.on_select:
                 self.on_select(self.project, self.selected.get())
+
+        def _on_open_clicked(self) -> None:
+            """Xử lý khi click nút Open."""
+            if self.on_open:
+                self.on_open(self.project)
 
         def set_selected(self, selected: bool) -> None:
             """
