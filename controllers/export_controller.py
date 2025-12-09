@@ -5,16 +5,20 @@ Controller này điều khiển:
 - Queue các projects cần xuất
 - Thực hiện xuất từng project
 - Cập nhật tiến trình lên View
+- Ghi lịch sử vào database
 """
 
 import threading
 import queue
 from typing import List, Optional, Callable
 from enum import Enum
+from datetime import datetime
 
 from models.project import Project
 from models.config import Config
+from models.database import Database, ExportHistory
 from services.automation_service import AutomationService, ExportStatus
+from utils.error_handler import ErrorHandler, ErrorSeverity
 
 
 class ExportState(Enum):
@@ -40,7 +44,8 @@ class ExportController:
         log_callback: Optional[Callable[[str], None]] = None,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
         status_callback: Optional[Callable[[ExportStatus, str], None]] = None,
-        completion_callback: Optional[Callable[[bool, str], None]] = None
+        completion_callback: Optional[Callable[[bool, str], None]] = None,
+        use_database: bool = True
     ):
         """
         Khởi tạo ExportController.
@@ -51,6 +56,7 @@ class ExportController:
             progress_callback: Callback cập nhật tiến trình (current, total, name)
             status_callback: Callback cập nhật trạng thái (status, message)
             completion_callback: Callback khi hoàn thành (success, message)
+            use_database: Có sử dụng database không
         """
         self.config = config
         self.log_callback = log_callback or (lambda x: print(x))
@@ -68,6 +74,26 @@ class ExportController:
         self._completed_count = 0
         self._failed_count = 0
         self._failed_projects: List[Project] = []
+
+        # Database and error handling
+        self.use_database = use_database
+        self.database: Optional[Database] = None
+        self.error_handler: Optional[ErrorHandler] = None
+
+        if use_database:
+            try:
+                self.database = Database()
+                self.error_handler = ErrorHandler(
+                    screenshot_on_error=config.vision_settings.screenshot_on_error,
+                    screenshot_dir=config.vision_settings.screenshot_dir
+                )
+                self._log("Database và error handler đã được kích hoạt")
+            except Exception as e:
+                self._log(f"Lỗi khởi tạo database: {e}")
+                self.use_database = False
+
+        # Current export history ID
+        self._current_export_history_id: Optional[int] = None
 
     def _log(self, message: str) -> None:
         """Ghi log message."""
@@ -123,8 +149,14 @@ class ExportController:
         self._automation_service = AutomationService(
             capcut_exe_path=self.config.capcut_exe_path,
             log_callback=self._log,
-            status_callback=self._update_status
+            status_callback=self._update_status,
+            use_vision=self.config.automation_settings.use_vision_detection,
+            vision_settings=self.config.vision_settings.to_dict()
         )
+
+        # Cập nhật retry settings
+        self._automation_service.retry_attempts = self.config.automation_settings.retry_attempts
+        self._automation_service.retry_delay = self.config.automation_settings.retry_delay
 
         # Bắt đầu thread xuất
         self._state = ExportState.RUNNING
@@ -149,16 +181,50 @@ class ExportController:
                 self._update_progress()
                 self._update_status(ExportStatus.STARTING, f"Bắt đầu xuất: {project.name}")
 
+                # Bắt đầu tracking trong database
+                start_time = datetime.now()
+                if self.use_database and self.database:
+                    history = ExportHistory(
+                        project_id=project.id,
+                        project_name=project.name,
+                        started_at=start_time,
+                        status='running'
+                    )
+                    self._current_export_history_id = self.database.add_export_history(history)
+
                 # Thực hiện xuất
                 success = self._automation_service.export_project(project.path)
 
+                # Tính thời gian
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+
                 if success:
                     self._completed_count += 1
-                    self._log(f"✓ Xuất thành công: {project.name}")
+                    self._log(f"✓ Xuất thành công: {project.name} ({duration:.1f}s)")
+
+                    # Cập nhật database
+                    if self.use_database and self.database and self._current_export_history_id:
+                        self.database.update_export_history(
+                            self._current_export_history_id,
+                            completed_at=end_time.isoformat(),
+                            duration=duration,
+                            status='success'
+                        )
                 else:
                     self._failed_count += 1
                     self._failed_projects.append(project)
                     self._log(f"✗ Xuất thất bại: {project.name}")
+
+                    # Cập nhật database
+                    if self.use_database and self.database and self._current_export_history_id:
+                        self.database.update_export_history(
+                            self._current_export_history_id,
+                            completed_at=end_time.isoformat(),
+                            duration=duration,
+                            status='failed',
+                            error_message='Export thất bại'
+                        )
 
                 self._export_queue.task_done()
 
@@ -169,6 +235,24 @@ class ExportController:
                 self._failed_count += 1
                 if self._current_project:
                     self._failed_projects.append(self._current_project)
+
+                # Xử lý lỗi với error handler
+                if self.error_handler:
+                    self.error_handler.handle_error(
+                        e,
+                        f"Lỗi xuất project: {self._current_project.name if self._current_project else 'Unknown'}",
+                        severity=ErrorSeverity.ERROR,
+                        context={'project': self._current_project.to_dict() if self._current_project else None}
+                    )
+
+                # Cập nhật database
+                if self.use_database and self.database and self._current_export_history_id:
+                    self.database.update_export_history(
+                        self._current_export_history_id,
+                        completed_at=datetime.now().isoformat(),
+                        status='failed',
+                        error_message=str(e)
+                    )
 
         # Hoàn thành
         self._on_export_complete()
@@ -297,3 +381,61 @@ class ExportController:
             Danh sách Project thất bại
         """
         return self._failed_projects.copy()
+
+    def batch_export_with_vision(
+        self,
+        projects: List[Project],
+        auto_retry_failed: bool = True
+    ) -> bool:
+        """
+        Xuất hàng loạt với vision detection.
+
+        Args:
+            projects: Danh sách projects cần xuất
+            auto_retry_failed: Có tự động retry các project thất bại không
+
+        Returns:
+            True nếu bắt đầu thành công
+        """
+        # Đảm bảo vision detection được bật
+        if self._automation_service:
+            self._automation_service.use_vision = True
+
+        # Bắt đầu export
+        success = self.start_export(projects)
+
+        # TODO: Implement auto-retry logic nếu cần
+        # if auto_retry_failed:
+        #     # Retry các project thất bại sau khi hoàn thành
+
+        return success
+
+    def get_export_statistics(self) -> dict:
+        """
+        Lấy thống kê xuất video.
+
+        Returns:
+            Dictionary chứa thống kê
+        """
+        stats = {
+            'current_session': {
+                'total': self._total_projects,
+                'completed': self._completed_count,
+                'failed': self._failed_count,
+                'remaining': self._export_queue.qsize(),
+                'state': self._state.value
+            }
+        }
+
+        # Thêm thống kê từ database nếu có
+        if self.use_database and self.database:
+            try:
+                stats['all_time'] = self.database.get_export_statistics()
+            except Exception as e:
+                self._log(f"Lỗi lấy thống kê từ database: {e}")
+
+        # Thêm thống kê lỗi nếu có
+        if self.error_handler:
+            stats['errors'] = self.error_handler.get_statistics()
+
+        return stats
